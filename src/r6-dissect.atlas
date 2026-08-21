@@ -1,17 +1,55 @@
+import "std/vector";
+import "std/optional";
+
 namespace r6 {
-    public struct handle {
+    #[std::non_copyable]
+    public struct round {
       private:
         handle: uint64;
       public:
-        ~handle() {
+        ~round() {
             r6::close_handle(this->handle);
         }
-        fun new(filePath: str) -> r6::handle {
-            return r6::handle {.handle = r6::open_file(filePath)};
+        fun new(filePath: str) -> r6::round {
+            return r6::round {.handle = r6::open_file(filePath)};
         }
         fun is_null(*const this) -> bool {
             return this->handle == 0;
-        } 
+        }
+        fun get_team_stats(*this) -> std::optional<std::vector<r6::team_stat>> {
+            let outCount: int32 = 0;
+            let teams = r6::get_teams(this->handle, &outCount);
+            if teams == null || outCount <= 0 {
+                return std::optional<std::vector<r6::team_stat>>::empty();
+            }
+
+            let i: int32 = 0;
+            let vec = std::vector<r6::team_stat>::with_capacity(outCount as uint64);
+            while i < outCount {
+                vec.push(teams[i as uint64]);
+            }
+            return std::optional<std::vector<r6::team_stat>>::of(std::move(vec));
+        }
+    }
+
+    #[c_name("CTeamStat")]
+    #[std::trivially_copyable]
+    public extern "C" struct team_stat {
+      public:
+        name: [char; 64];
+        score: int32;
+        won: int32;
+        win_condition: [char; 64];
+    }
+
+    #[c_name("CPlayerStat")]
+    #[std::trivially_copyable]
+    public extern "C" struct player_stat {
+      public:
+        name: [char; 64];
+        score: int32;
+        won: int32;
+        win_condition: [char; 64];
     }
 
     #[c_name("Dissect_Open")]
@@ -19,4 +57,16 @@ namespace r6 {
 
     #[c_name("Dissect_Free")]
     private extern "C" fun close_handle(h: uint64);
+
+    #[c_name("Dissect_GetSite")]
+    private extern "C" fun get_site(h: uint64) -> str;
+
+    #[c_name("Dissect_FreeString")]
+    private extern "C" fun Dissect_FreeString(s: *char);
+
+    #[c_name("Dissect_GetTeams")]
+    private extern "C" fun get_teams(h: uint64, outCount: *int32) -> *r6::team_stat;
+
+    #[c_name("Dissect_GetPlayerStats")]
+    private extern "C" fun get_player_stats(h: uint64, outCount: *int32) -> *r6::player_stat;
 }

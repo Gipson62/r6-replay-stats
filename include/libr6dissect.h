@@ -24,7 +24,28 @@ extern const char *_GoStringPtr(_GoString_ s);
 #line 3 "r6_wrapper.go"
 
 #include <stdlib.h>
+#include <string.h>
+
 typedef uintptr_t DissectHandle;
+
+// C-compatible structure for player stats within a round
+typedef struct {
+    char username[64];
+    char operator_name[64];
+    int team_index;
+    int kills;
+    int deaths;
+    int assists;
+    int headshots;
+} CPlayerStat;
+
+// C-compatible structure for team outcomes
+typedef struct {
+    char name[64];
+    int score;
+    int won;
+    char win_condition[64];
+} CTeamStat;
 
 #line 1 "cgo-generated-wrapper"
 
@@ -90,6 +111,10 @@ extern "C" {
 
 extern DissectHandle Dissect_Open(char* filePath);
 extern void Dissect_Free(DissectHandle h);
+extern char* Dissect_GetSite(DissectHandle h);
+extern void Dissect_FreeString(char* str);
+extern CTeamStat* Dissect_GetTeams(DissectHandle h, int* outCount);
+extern CPlayerStat* Dissect_GetPlayerStats(DissectHandle h, int* outCount);
 
 #ifdef __cplusplus
 }

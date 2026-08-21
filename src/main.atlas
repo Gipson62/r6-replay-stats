@@ -1,11 +1,26 @@
 import "r6-dissect.atlas";
 import "std/io";
 
-fun main() {
-    let handle = r6::handle::new("D:/SteamLibrary/steamapps/common/Tom Clancy's Rainbow Six Siege/MatchReplay/Match-2026-08-20_22-03-55-18228/Match-2026-08-20_22-03-55-18228-R01.rec");
-    if handle.is_null() {
-        std::println("Couldn't open the replay");
-    } else {
-        std::println("Successfuly opened one replay");
+fun main(argc: int32, argv: *[char]) {
+    std::println("Test");
+    let round = r6::round::new("D:/SteamLibrary/steamapps/common/Tom Clancy's Rainbow Six Siege/MatchReplay/Match-2026-08-20_22-03-55-18228/Match-2026-08-20_22-03-55-18228-R01.rec");
+    std::println("Test2");
+    if round.is_null() {
+        std::panic("Couldn't open the replay");
     }
+    std::println("Test3");
+
+    let opt = round.get_team_stats();
+    std::println("Test4");
+    if !opt.has_value() {
+        std::panic("Couldn't get team stats");
+    }
+
+    let arr: std::vector<r6::team_stat> = opt.value();
+
+    std::printf("[GIPSON62] Number of team: %d\n", arr.len());
+    std::printf("[GIPSON62] Score of team 1: %d\n", arr.get(0)->score);
+    std::printf("[GIPSON62] Team 1 result: %d\n", arr.get(0)->won);
+    std::printf("[GIPSON62] Team 1 Win condition : %s\n", arr.get(0)->win_condition);
+    std::printf("[GIPSON62] Team 1 Name: %s\n", arr.get(0)->name);
 }

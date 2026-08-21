@@ -2,7 +2,10 @@ module r6wrapper
 
 go 1.27.0
 
-require github.com/Gipson62/r6-dissect v0.0.0
+require (
+	github.com/redraskal/r6-dissect v0.0.0
+	github.com/rs/zerolog v1.33.0
+)
 
 require (
 	github.com/klauspost/compress v1.17.11 // indirect
@@ -11,7 +14,6 @@ require (
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/richardlehane/mscfb v1.0.4 // indirect
 	github.com/richardlehane/msoleps v1.0.4 // indirect
-	github.com/rs/zerolog v1.33.0 // indirect
 	github.com/xuri/efp v0.0.0-20240408161823-9ad904a10d6d // indirect
 	github.com/xuri/excelize/v2 v2.9.0 // indirect
 	github.com/xuri/nfp v0.0.0-20240318013403-ab9948c2c4a7 // indirect
@@ -24,4 +26,4 @@ require (
 	golang.org/x/tools v0.27.0 // indirect
 )
 
-replace github.com/Gipson62/r6-dissect => ./local_deps/r6-dissect
+replace github.com/redraskal/r6-dissect => ./local_deps/r6-dissect
