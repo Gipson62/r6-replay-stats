@@ -1,0 +1,22 @@
+namespace r6 {
+    public struct handle {
+      private:
+        handle: uint64;
+      public:
+        ~handle() {
+            r6::close_handle(this->handle);
+        }
+        fun new(filePath: str) -> r6::handle {
+            return r6::handle {.handle = r6::open_file(filePath)};
+        }
+        fun is_null(*const this) -> bool {
+            return this->handle == 0;
+        } 
+    }
+
+    #[c_name("Dissect_Open")]
+    private extern "C" fun open_file(filePath: str) -> uint64;
+
+    #[c_name("Dissect_Free")]
+    private extern "C" fun close_handle(h: uint64);
+}

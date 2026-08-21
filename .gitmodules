@@ -1,0 +1,3 @@
+[submodule "local_deps/r6-dissect"]
+	path = vendor/tinycc
+	url = https://github.com/Gipson62/r6-dissect
