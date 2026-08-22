@@ -24,28 +24,7 @@ extern const char *_GoStringPtr(_GoString_ s);
 #line 3 "r6_wrapper.go"
 
 #include <stdlib.h>
-#include <string.h>
-
-typedef uintptr_t DissectHandle;
-
-// C-compatible structure for player stats within a round
-typedef struct {
-    char username[64];
-    char operator_name[64];
-    int team_index;
-    int kills;
-    int deaths;
-    int assists;
-    int headshots;
-} CPlayerStat;
-
-// C-compatible structure for team outcomes
-typedef struct {
-    char name[64];
-    int score;
-    int won;
-    char win_condition[64];
-} CTeamStat;
+#include <stdint.h>
 
 #line 1 "cgo-generated-wrapper"
 
@@ -109,12 +88,30 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern DissectHandle Dissect_Open(char* filePath);
-extern void Dissect_Free(DissectHandle h);
-extern char* Dissect_GetSite(DissectHandle h);
-extern void Dissect_FreeString(char* str);
-extern CTeamStat* Dissect_GetTeams(DissectHandle h, int* outCount);
-extern CPlayerStat* Dissect_GetPlayerStats(DissectHandle h, int* outCount);
+extern uintptr_t Dissect_Open(char* path);
+extern void Dissect_Free(uintptr_t handle);
+extern void Dissect_FreeString(char* s);
+extern char* Dissect_MatchID(uintptr_t handle);
+extern char* Dissect_Map(uintptr_t handle);
+extern char* Dissect_GameMode(uintptr_t handle);
+extern char* Dissect_GameVersion(uintptr_t handle);
+extern int Dissect_PlayerCount(uintptr_t handle);
+extern char* Dissect_PlayerUsername(uintptr_t handle, int index);
+extern int Dissect_PlayerTeamIndex(uintptr_t handle, int index);
+extern int Dissect_PlayerKills(uintptr_t handle, int index);
+extern int Dissect_PlayerDeaths(uintptr_t handle, int index);
+extern int Dissect_PlayerAssists(uintptr_t handle, int index);
+extern int Dissect_PlayerHeadshots(uintptr_t handle, int index);
+extern int Dissect_RoundNumber(uintptr_t handle);
+extern int Dissect_RoundsPerMatch(uintptr_t handle);
+extern int Dissect_RoundWinningTeamIndex(uintptr_t handle);
+extern char* Dissect_ObjectiveSite(uintptr_t handle);
+extern int Dissect_EventCount(uintptr_t handle);
+extern char* Dissect_EventType(uintptr_t handle, int index);
+extern char* Dissect_EventTime(uintptr_t handle, int index);
+extern double Dissect_EventTimeInSeconds(uintptr_t handle, int index);
+extern char* Dissect_EventUsername(uintptr_t handle, int index);
+extern char* Dissect_EventTarget(uintptr_t handle, int index);
 
 #ifdef __cplusplus
 }
