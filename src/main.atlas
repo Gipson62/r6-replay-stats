@@ -1,26 +1,114 @@
-import "r6-dissect.atlas";
+import "src/r6-dissect.atlas";
 import "std/io";
 
-fun main(argc: int32, argv: *[char]) {
-    std::println("Test");
-    let round = r6::round::new("D:/SteamLibrary/steamapps/common/Tom Clancy's Rainbow Six Siege/MatchReplay/Match-2026-08-20_22-03-55-18228/Match-2026-08-20_22-03-55-18228-R01.rec");
-    std::println("Test2");
-    if round.is_null() {
-        std::panic("Couldn't open the replay");
-    }
-    std::println("Test3");
-
-    let opt = round.get_team_stats();
-    std::println("Test4");
-    if !opt.has_value() {
-        std::panic("Couldn't get team stats");
+fun print_string_field(label: *const uint8, value: str) {
+    if value == null {
+        std::printf("[%s]: <null>\n", label);
+        return;
     }
 
-    let arr: std::vector<r6::team_stat> = opt.value();
+    std::printf("[%s]: ", label);
+    std::printf("%s\n", value);
 
-    std::printf("[GIPSON62] Number of team: %d\n", arr.len());
-    std::printf("[GIPSON62] Score of team 1: %d\n", arr.get(0)->score);
-    std::printf("[GIPSON62] Team 1 result: %d\n", arr.get(0)->won);
-    std::printf("[GIPSON62] Team 1 Win condition : %s\n", arr.get(0)->win_condition);
-    std::printf("[GIPSON62] Team 1 Name: %s\n", arr.get(0)->name);
+    //dissect::FreeString(value);
+}
+
+fun main(argc: int32, argv: **char) -> int32 {
+    let match_ = r6::Match::new(
+        std::string::from_chars("m-001"), 
+        std::string::from_chars("Chalet"), 
+        std::string::from_chars("Bomb"), 
+        std::string::from_chars("Y9S3")
+    );
+    match_.set_team(0, r6::Team::new(0, std::string::from_chars("RCK Esport")));
+    match_.set_team(1, r6::Team::new(1, std::string::from_chars("Opponent")));
+ 
+    let a = match_.add_player(std::string::from_chars("Nivalem"), 0);
+    let b = match_.add_player(std::string::from_chars("Capy"), 0);
+    let c = match_.add_player(std::string::from_chars("EnemyOne"), 1);
+    let d = match_.add_player(std::string::from_chars("EnemyTwo"), 1);
+ 
+    let r1 = match_.add_round(1, std::string::from_chars("2F Bedroom"));
+    r1->add_participant(r6::RoundParticipant{
+        .player_id = a, 
+        .team_index = r6::TeamIndex::new(0), 
+        .side = r6::TeamSide::ATTACK,
+        .operator_name = std::string::from_chars("Ash")
+    });
+    r1->add_participant(r6::RoundParticipant{
+        .player_id = b, 
+        .team_index = r6::TeamIndex::new(0), 
+        .side = r6::TeamSide::ATTACK,
+        .operator_name = std::string::from_chars("Thermite")
+    });
+    r1->add_participant(r6::RoundParticipant{
+        .player_id = c, 
+        .team_index = r6::TeamIndex::new(1), 
+        .side = r6::TeamSide::DEFENSE,
+        .operator_name = std::string::from_chars("Jaeger")
+    });
+    r1->add_participant(r6::RoundParticipant{
+        .player_id = d, 
+        .team_index = r6::TeamIndex::new(1), 
+        .side = r6::TeamSide::DEFENSE,
+        .operator_name = std::string::from_chars("Bandit")
+    });
+ 
+    // EnemyOne opens by killing Nivalem, Capy trades him back 4s later.
+    r1->add_kill(r6::KillEvent {
+        .time_in_round_seconds = 12.0, 
+        .killer_id = c, 
+        .victim_id = a, 
+        .is_headshot = false
+    });
+    r1->add_kill(r6::KillEvent {
+        .time_in_round_seconds = 16.0, 
+        .killer_id = b, 
+        .victim_id = c, 
+        .is_headshot = true
+    });
+ 
+    // Capy plants and clutches the 1v1 against EnemyTwo.
+    r1->add_objective_event(r6::ObjectiveEvent{
+        .time_in_round_seconds = 40.0, 
+        .player_id = b, 
+        .type = r6::ObjectiveActionType::PLANT_COMPLETE
+    });
+    r1->add_kill(r6::KillEvent {
+        .time_in_round_seconds = 58.0, 
+        .killer_id = b, 
+        .victim_id = d, 
+        .is_headshot = false
+    });
+ 
+    r1->set_winner(r6::TeamIndex::new(0), r6::WinCondition::BOMB_DEFUSED);
+ 
+    std::print("Match outcome for RCK Esport: ");
+    if match_.get_outcome(r6::TeamIndex::new(0)) == MatchOutcome::WIN {
+        std::print("Win");
+    } else {
+        std::print("Lose");
+    } 
+    std::printf(" (%d - ", match_.team_score(r6::TeamIndex::new(0)));
+    std::printf("%d)\n\n", match_.team_score(r6::TeamIndex::new(1)));
+ 
+    let i: uint64 = 0;
+    let leaderboard = match_.get_leaderboard();
+    while i < leaderboard.len() {
+        let s = leaderboard.get(i);
+        std::printf("%s:\n", s->username.c_str());
+        std::printf(" K/D= %f\n", s->kd());
+        std::printf(" KPR= %f\n", s->kpr());
+        std::printf(" HS%%= %f\n", s->hs_percent());
+        std::printf(" SRV= %f\n", s->srv());
+        std::printf(" KOST= %f\n", s->kost());
+        std::printf(" Entry= %d\n", s->entry());
+        std::printf(" Trade= %d\n", s->trade_diff());
+        std::printf(" Obj= %d\n", s->objective());
+        std::printf(" Rating= %f\n", s->rating());
+
+        i = i + 1;
+    }
+    return 0;
+
 }

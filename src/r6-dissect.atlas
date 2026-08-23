@@ -1,72 +1,63 @@
 import "std/vector";
 import "std/optional";
+import "std/string";
 
-namespace r6 {
-    #[std::non_copyable]
-    public struct round {
-      private:
-        handle: uint64;
-      public:
-        ~round() {
-            r6::close_handle(this->handle);
-        }
-        fun new(filePath: str) -> r6::round {
-            return r6::round {.handle = r6::open_file(filePath)};
-        }
-        fun is_null(*const this) -> bool {
-            return this->handle == 0;
-        }
-        fun get_team_stats(*this) -> std::optional<std::vector<r6::team_stat>> {
-            let outCount: int32 = 0;
-            let teams = r6::get_teams(this->handle, &outCount);
-            if teams == null || outCount <= 0 {
-                return std::optional<std::vector<r6::team_stat>>::empty();
-            }
-
-            let i: int32 = 0;
-            let vec = std::vector<r6::team_stat>::with_capacity(outCount as uint64);
-            while i < outCount {
-                vec.push(teams[i as uint64]);
-            }
-            return std::optional<std::vector<r6::team_stat>>::of(std::move(vec));
-        }
-    }
-
-    #[c_name("CTeamStat")]
-    #[std::trivially_copyable]
-    public extern "C" struct team_stat {
-      public:
-        name: [char; 64];
-        score: int32;
-        won: int32;
-        win_condition: [char; 64];
-    }
-
-    #[c_name("CPlayerStat")]
-    #[std::trivially_copyable]
-    public extern "C" struct player_stat {
-      public:
-        name: [char; 64];
-        score: int32;
-        won: int32;
-        win_condition: [char; 64];
-    }
-
+import "src/events.atlas";
+import "src/player.atlas";
+import "src/round_stats.atlas";
+import "src/round.atlas";
+import "src/types.atlas";
+import "src/match.atlas";
+    
+namespace dissect {
     #[c_name("Dissect_Open")]
-    private extern "C" fun open_file(filePath: str) -> uint64;
+    private extern "C" fun Open(filePath: *char) -> uint64;
 
     #[c_name("Dissect_Free")]
-    private extern "C" fun close_handle(h: uint64);
-
-    #[c_name("Dissect_GetSite")]
-    private extern "C" fun get_site(h: uint64) -> str;
+    private extern "C" fun Free(h: uint64);
 
     #[c_name("Dissect_FreeString")]
-    private extern "C" fun Dissect_FreeString(s: *char);
-
-    #[c_name("Dissect_GetTeams")]
-    private extern "C" fun get_teams(h: uint64, outCount: *int32) -> *r6::team_stat;
-
-    #[c_name("Dissect_GetPlayerStats")]
-    private extern "C" fun get_player_stats(h: uint64, outCount: *int32) -> *r6::player_stat;
+    public extern "C" fun FreeString(s: str);
+    #[c_name("Dissect_MatchID")]
+    private extern "C" fun MatchID(h: uint64) -> str;
+    #[c_name("Dissect_Map")]
+    private extern "C" fun Map(h: uint64) -> str;
+    #[c_name("Dissect_GameMode")]
+    private extern "C" fun GameMode(h: uint64) -> str;
+    #[c_name("Dissect_GameVersion")]
+    private extern "C" fun GameVersion(h: uint64) -> str;
+    #[c_name("Dissect_PlayerCount")]
+    private extern "C" fun PlayerCount(h: uint64) -> int32;
+    #[c_name("Dissect_PlayerUsername")]
+    private extern "C" fun PlayerUsername(h: uint64, index: int32) -> str;
+    #[c_name("Dissect_PlayerTeamIndex")]
+    private extern "C" fun PlayerTeamIndex(h: uint64, index: int32) -> int32;
+    #[c_name("Dissect_PlayerKills")]
+    private extern "C" fun PlayerKills(h: uint64, index: int32) -> int32;
+    #[c_name("Dissect_PlayerDeaths")]
+    private extern "C" fun PlayerDeaths(h: uint64, index: int32) -> int32;
+    #[c_name("Dissect_PlayerAssists")]
+    private extern "C" fun PlayerAssists(h: uint64, index: int32) -> int32;
+    #[c_name("Dissect_PlayerHeadshots")]
+    private extern "C" fun PlayerHeadshots(h: uint64, index: int32) -> int32;
+    #[c_name("Dissect_RoundNumber")]
+    private extern "C" fun RoundNumber(h: uint64) -> int32;
+    #[c_name("Dissect_RoundsPerMatch")]
+    private extern "C" fun RoundsPerMatch(h: uint64) -> int32;
+    #[c_name("Dissect_RoundWinningTeamIndex")]
+    private extern "C" fun RoundWinningTeamIndex(h: uint64) -> int32;
+    #[c_name("Dissect_ObjectiveSite")]
+    private extern "C" fun ObjectiveSite(h: uint64) -> str;
+    #[c_name("Dissect_EventCount")]
+    private extern "C" fun EventCount(h: uint64) -> int32;
+    #[c_name("Dissect_EventType")]
+    private extern "C" fun EventType(h: uint64, index: int32) -> str;
+    #[c_name("Dissect_EventTime")]
+    private extern "C" fun EventTime(h: uint64, index: int32) -> str;
+    #[c_name("Dissect_EventTimeInSeconds")]
+    private extern "C" fun EventTimeInSeconds(h: uint64, index: int32) -> float64;
+    #[c_name("Dissect_EventUsername")]
+    private extern "C" fun EventUsername(h: uint64, index: int32) -> str;
+    #[c_name("Dissect_EventTarget")]
+    private extern "C" fun EventTarget(h: uint64, index: int32) -> str;
 }

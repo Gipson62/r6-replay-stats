@@ -1,0 +1,48 @@
+import "src/types.atlas";
+import "std/string";
+
+
+namespace r6 {
+    public struct Player {
+      public:
+        id: r6::PlayerId;
+        username: std::string;
+        team_index: r6::TeamIndex;
+
+        fun default() -> This {
+            return r6::Player {
+                .id         = r6::PlayerId::default(),
+                .username   = std::string::default(),
+                .team_index = r6::TeamIndex::default()
+            };
+        }
+
+        fun new(id: r6::PlayerId, username: std::string, team_index: r6::TeamIndex) -> This {
+            return r6::Player {
+                .id         = id,
+                .username   = std::move(username),
+                .team_index = team_index
+            };
+        }
+    }
+
+    public struct Team {
+      public:
+        index: r6::TeamIndex;
+        name: std::string;
+
+        fun default() -> This {
+            return r6::Team {
+                .index = r6::TeamIndex::new(-1),
+                .name  = std::string::default()
+            };
+        }
+
+        fun new(index: int32, name: std::string) -> This {
+            return r6::Team {
+                .index = r6::TeamIndex::new(index),
+                .name  = std::move(name)
+            };
+        }
+    }
+}

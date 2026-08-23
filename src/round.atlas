@@ -1,0 +1,309 @@
+import "std/string";
+import "std/vector";
+import "std/map";
+import "std/optional";
+import "src/types.atlas";
+import "src/events.atlas";
+import "src/round_stats.atlas";
+
+namespace r6 {
+    public struct RoundParticipant {
+      public:
+        player_id: r6::PlayerId;
+        team_index: r6::TeamIndex;
+        side: r6::TeamSide;
+        operator_name: std::string;
+
+        fun new(
+            player_id: r6::PlayerId, 
+            team_index: r6::TeamIndex, 
+            side: r6::TeamSide, 
+            operator_name: std::string
+        ) -> This {
+            return r6::RoundParticipant {
+                .player_id    = player_id,
+                .team_index   = team_index,
+                .side          = side,
+                .operator_name = std::move(operator_name)
+            };
+        }
+    }
+
+    public struct Round {
+      public:
+        fun new(round_number: int32, site: std::string) -> This {
+            return r6::Round {
+                .round_number = round_number,
+                .site = std::move(site),
+                .winning_team_index = r6::TeamIndex::default(),
+                .win_condition = r6::WinCondition::UNKNOWN_WIN_CON,
+                .participants = std::vector<r6::RoundParticipant>::with_capacity(10),
+                .kills = std::vector<r6::KillEvent>::with_capacity(10),
+                .objective_events = std::vector<r6::ObjectiveEvent>::with_capacity(15),
+            };
+        }
+
+        fun add_participant(*this, participant: r6::RoundParticipant) {
+            this->participants.push(std::move(participant));
+        }
+        fun add_kill(*this, kill: r6::KillEvent) {
+            let low: uint64 = 0;
+            let high = this->kills.len();
+            while low < high {
+                let mid = low + (high - low) / 2;
+                if this->kills.get(mid)->time_in_round_seconds < kill.time_in_round_seconds {
+                    low = mid + 1;
+                } else {
+                    high = mid;
+                }
+            }
+            this->kills.insert(low, std::move(kill));
+        }
+        fun add_objective_event(*this, objective: r6::ObjectiveEvent) {
+            this->objective_events.push(std::move(objective));
+        }
+        fun set_winner(*this, team_index: r6::TeamIndex, win_con: r6::WinCondition)  {
+            this->winning_team_index = team_index;
+            this->win_condition = win_con;
+        }
+        fun number(*const this) -> int32 {
+            return this->round_number;
+        }
+        fun site(*const this) -> *const std::string {
+            return &this->site;
+        }
+        fun winning_team_index(*const this) -> r6::TeamIndex {
+            return this->winning_team_index;
+        }
+        fun win_condition(*const this) -> r6::WinCondition {
+            return this->win_condition;
+        }
+        fun participants(*const this) -> *const std::vector<r6::RoundParticipant> {
+            return &this->participants;
+        }
+        fun kills(*const this) -> *const std::vector<r6::KillEvent> {
+            return &this->kills;
+        }
+        fun objective_events(*const this) -> *const std::vector<r6::ObjectiveEvent> {
+            return &this->objective_events;
+        }
+        fun has_player(*const this, id: r6::PlayerId) -> bool {
+            let i: uint64 = 0;
+            while i < this->participants.len() {
+                if this->participants.get(i)->player_id == id {
+                    return true;
+                }
+
+                i = i + 1;
+            }
+            return false;
+        }
+        fun get_player_stats(*const this, id: r6::PlayerId) -> std::optional<r6::PlayerRoundStats> {
+            let i: uint64 = 0;
+            let all_stats = this->get_all_player_stats();
+            while i < all_stats.len() {
+                if all_stats.get(i)->id == id {
+                    return std::optional<r6::PlayerRoundStats>::of(all_stats.take(i));
+                }
+
+                i = i + 1;
+            }
+            return std::optional<r6::PlayerRoundStats>::empty();
+        }
+        fun get_all_player_stats(*const this) -> std::vector<r6::PlayerRoundStats> {
+            let kTradeWindowSeconds: float64 = 10.0;
+            let stats_by_player = std::map<r6::PlayerId, r6::PlayerRoundStats>::new();
+            let team_of = std::map<r6::PlayerId, r6::TeamIndex>::new();
+            let alive = std::map<r6::PlayerId, bool>::new();
+            // team_index -> alive count
+            let alive_count = std::map<r6::TeamIndex, int32>::new();
+
+            let i_participant: uint64 = 0;
+            while i_participant < this->participants.len() {
+                let p = this->participants.get(i_participant);
+                let s = r6::PlayerRoundStats::default();
+                s.id = p->player_id;
+                s.team_index = p->team_index;
+                s.survived = true; // default alive unless a kill event says otherwise
+
+                stats_by_player.set(p->player_id, s);
+                team_of.set(p->player_id, p->team_index);
+                alive.set(p->player_id, true);
+                let count_ptr = alive_count.get_ptr(&p->team_index);
+                if count_ptr != null {
+                    alive_count.set(p->team_index, (*count_ptr) + 1);
+                } else {
+                    alive_count.set(p->team_index, 1);
+                }
+
+                i_participant = i_participant + 1;
+            }
+
+            let i_objective: uint64 = 0;
+            while i_objective < this->objective_events.len() {
+                let e = this->objective_events.get(i_objective);
+                let player = stats_by_player.get_mut_ptr(&e->player_id);
+                if player != null {
+                    if e->type == r6::ObjectiveActionType::PLANT_COMPLETE {
+                        player->plants = player->plants + 1;
+                    } else if e->type == r6::ObjectiveActionType::DISABLE_COMPLETE {
+                        player->defuses = player->defuses + 1;
+                    }
+                }
+                i_objective = i_objective + 1;
+            }
+
+            let opening_assigned = false;
+
+            // team_index -> the lone surviror at the moment that team dropped to 1
+            // player alive while the enemy team still had players up
+            let clutch_candidate = std::map<r6::TeamIndex, r6::PlayerId>::new();
+            let clutch_against_count = std::map<r6::TeamIndex, int32>::new();
+
+            let i_kill: uint64 = 0;
+            while i_kill < this->kills.len() {
+                let e = this->kills.get(i_kill);
+
+                if !opening_assigned && e->has_killer() {
+                    opening_assigned = true;
+
+                    if stats_by_player.contains_key(&e->killer_id) {
+                        stats_by_player.get_mut_ptr(&e->killer_id)->opening_kill = true;
+                    }
+                    if stats_by_player.contains_key(&e->victim_id) {
+                        stats_by_player.get_mut_ptr(&e->victim_id)->opening_death = true;
+                    }
+                }
+
+                if stats_by_player.contains_key(&e->victim_id) {
+                    stats_by_player.get_mut_ptr(&e->victim_id)->died = true;
+                    stats_by_player.get_mut_ptr(&e->victim_id)->survived = false;
+                }
+
+                if e->has_killer() && stats_by_player.contains_key(&e->killer_id) {
+                    let killer_stats = stats_by_player.get_mut_ptr(&e->killer_id);
+                    killer_stats->kills = killer_stats->kills + 1;
+                    if e->is_weapon_kill() {
+                        killer_stats->weapon_kills = killer_stats->weapon_kills + 1;
+                    }
+                    if e->is_headshot {
+                        killer_stats->headshots = killer_stats->headshots + 1;
+                    }
+                }
+
+                if alive.contains_key(&e->victim_id) && *alive.get_ptr(&e->victim_id) {
+                    alive.set(e->victim_id, false);
+
+                    let team_id = team_of.get_ptr(&e->victim_id);
+                    let count = *alive_count.get_ptr(team_id);
+                    alive_count.set(*team_id, count - 1);
+                }
+
+                // Trade detection: does a teammate of the victim kill this killer
+                // within the trade window?
+                if e->has_killer() {
+                    let j = i_kill + 1;
+                    let stop: bool = false;
+                    while j < this->kills.len() && !stop {
+                        let later = this->kills.get(j); // safe: condition already proved j < len
+                        if (later->time_in_round_seconds - e->time_in_round_seconds) > kTradeWindowSeconds {
+                            stop = true;
+                        } else {
+                            if later->has_killer() && later->victim_id == e->killer_id &&
+                            team_of.contains_key(&later->killer_id) && team_of.contains_key(&e->victim_id) &&
+                            *team_of.get_ptr(&later->killer_id) == *team_of.get_ptr(&e->victim_id) &&
+                            later->killer_id != e->victim_id {
+                                stats_by_player.get_mut_ptr(&e->victim_id)->was_traded = true;
+                                stats_by_player.get_mut_ptr(&later->killer_id)->trade_kills =
+                                    stats_by_player.get_ptr(&later->killer_id)->trade_kills + 1;
+                            }
+                            j = j + 1;
+                        }
+                    }
+                }
+
+                // Clutch tracking: has any team just dropped to exactly 1 alive
+                // while the enemy team has players up?
+                let i_count: uint64 = 0;
+                let count_pairs = alive_count.pairs();
+                while i_count < count_pairs.len() {
+                    let pair = *count_pairs.get(i_count);
+                    let team_index = pair->key;
+                    let count = pair->value;
+                    if !(count != 1 || clutch_candidate.contains_key(&team_index)) {
+                        let enemy_team: r6::TeamIndex = r6::TeamIndex::new(0);
+                        if (team_index == r6::TeamIndex::new(0)) {
+                            enemy_team = r6::TeamIndex::new(1);
+                        }
+                        let enemy = alive_count.get_ptr(&enemy_team);
+                        let enemy_alive: int32 = 0;
+                        if enemy != null {
+                            enemy_alive = *enemy;
+                        }
+                        if !(enemy_alive < 1) {
+                            let i_player: uint64 = 0;
+                            let alive_pairs = alive.pairs();
+                            let found_clutch_player: bool = false;
+                            while i_player < alive_pairs.len() && !found_clutch_player {
+                                let alive_pair = *alive_pairs.get(i_player);
+                                let pid = alive_pair->key;
+                                let is_alive = alive_pair->value;
+                                if is_alive && (*team_of.get_ptr(&pid)) == team_index {
+                                    clutch_candidate.set(team_index, pid);
+                                    clutch_against_count.set(team_index, enemy_alive);
+                                    // Need a break here, but I don't know how to do it...
+                                    found_clutch_player = true;
+                                }
+                                i_player = i_player + 1;
+                            }
+                        }
+                    }
+                    i_count = i_count + 1;
+                }
+
+
+                i_kill = i_kill + 1;
+            }
+
+            let i_clutch: uint64 = 0;
+            let candidate_pairs = clutch_candidate.pairs();
+            while i_clutch < candidate_pairs.len() {
+                let pair = *candidate_pairs.get(i_clutch);
+                let team_index = pair->key;
+                let player_id = pair->value;
+
+                let stat = stats_by_player.get_mut_ptr(&player_id);
+                if stat != null {
+                    stat->clutch_against = *clutch_against_count.get_ptr(&team_index);
+                    if (this->winning_team_index == team_index) {
+                        stat->clutch = true;
+                    }
+                }
+
+                i_clutch = i_clutch + 1;
+            }
+
+            let result = std::vector<r6::PlayerRoundStats>::with_capacity(stats_by_player.len());
+            let i: uint64 = 0;
+            let stat_pairs = stats_by_player.pairs();
+            while i < stats_by_player.len() {
+                let pair = *stat_pairs.get(i);
+                let s = pair->value;
+                result.push(s);
+
+                i = i + 1;
+            }
+            return result;
+        }
+
+      private:
+        round_number: int32;
+        site: std::string;
+        winning_team_index: r6::TeamIndex;
+        win_condition: r6::WinCondition;
+
+        participants: std::vector<r6::RoundParticipant>;
+        kills: std::vector<r6::KillEvent>;
+        objective_events: std::vector<r6::ObjectiveEvent>;
+    }
+}

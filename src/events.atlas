@@ -1,0 +1,75 @@
+import "src/types.atlas";
+import "std/optional";
+import "std/string";
+
+namespace r6 {
+    public struct KillEvent {
+      public:
+        time_in_round_seconds: float64;
+        killer_id: r6::PlayerId;
+        victim_id: r6::PlayerId;
+        is_headshot: bool;
+
+        weapon: std::optional<std::string>;
+
+
+        fun default() -> This {
+            return r6::KillEvent {
+                .time_in_round_seconds = 0.0,
+                .killer_id             = r6::PlayerId::default(),
+                .victim_id             =  r6::PlayerId::default(),
+                .is_headshot           = false,
+                .weapon                = std::optional<std::string>::empty()
+            };
+        }
+        fun new(
+            time: float64, 
+            killer_id: r6::PlayerId, 
+            victim_id: r6::PlayerId, 
+            is_headshot: bool, 
+            weapon: std::optional<std::string>
+        ) -> This {
+            return r6::KillEvent {
+                .time_in_round_seconds = time,
+                .killer_id = killer_id,
+                .victim_id = victim_id,
+                .is_headshot = is_headshot,
+                .weapon = std::move(weapon)
+            };
+        }
+
+        fun is_weapon_kill(*const this) -> bool {
+            return this->weapon.has_value();
+        }
+        fun has_killer(*const this) -> bool {
+            return this->killer_id != r6::PlayerId::default();
+        }
+    }
+
+    public struct ObjectiveEvent {
+      public:
+        time_in_round_seconds: float64;
+        player_id: r6::PlayerId;
+        type: r6::ObjectiveActionType;
+        
+        fun default() -> This {
+            return r6::ObjectiveEvent {
+                .time_in_round_seconds = 0.0,
+                .player_id = r6::PlayerId::default(),
+                .type = r6::ObjectiveActionType::LOCATE_OBJECTIVE
+            };
+        }
+
+        fun new(
+            time_in_round_seconds: float64,
+            player_id: r6::PlayerId,
+            type: r6::ObjectiveActionType
+        ) -> This {
+            return r6::ObjectiveEvent {
+                .time_in_round_seconds = time_in_round_seconds,
+                .player_id = player_id,
+                .type = type
+            };
+        }
+    }
+}

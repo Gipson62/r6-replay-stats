@@ -1,0 +1,51 @@
+import "src/types.atlas";
+
+namespace r6 {
+    public struct PlayerRoundStats {
+      public:
+        id: r6::PlayerId;
+        team_index: r6::TeamIndex;
+
+        kills: int32;
+        weapon_kills: int32;
+
+        died: bool;
+        headshots: int32;
+
+        opening_kill: bool;
+        opening_death: bool;
+
+        plants: int32;
+        defuses: int32;
+
+        trade_kills: int32;
+        was_traded: bool;
+
+        survived: bool;
+        clutch: bool;
+        clutch_against: int32;
+        
+        fun default() -> This {
+            return r6::PlayerRoundStats {
+                .id             = r6::PlayerId::default(),
+                .team_index     = r6::TeamIndex::default(),
+                .kills          = 0,
+                .weapon_kills   = 0,
+                .died           = false,
+                .headshots      = 0,
+                .opening_kill   = false,
+                .opening_death  = false,
+                .plants         = 0,
+                .defuses        = 0,
+                .trade_kills    = 0,
+                .was_traded     = false,
+                .survived       = true,
+                .clutch         = false,
+                .clutch_against = 0,
+            };
+        }
+        fun got_kost(*const this) -> bool {
+            return this->kills > 0 || this->plants > 0 || this->defuses > 0 || this->survived || this->was_traded;
+        }
+    }
+}

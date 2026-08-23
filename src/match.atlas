@@ -1,0 +1,274 @@
+import "std/string";
+import "std/vector";
+import "src/types.atlas";
+import "src/player.atlas";
+import "src/round.atlas";
+
+namespace r6 {
+    public struct PlayerMatchStats {
+      public:
+        player_id: r6::PlayerId;
+        username: std::string;
+        team_index: r6::TeamIndex;
+
+        rounds_played: int32;
+        kills: int32;
+        weapon_kills: int32;
+        deaths: int32;
+        headshots: int32;
+        
+        opening_kills: int32;
+        opening_deaths: int32;
+    
+        plants: int32;
+        defuses: int32;
+    
+        trade_kills: int32;
+        dead_for_trade: int32;
+    
+        rounds_survived: int32;
+        rounds_with_kost: int32;
+        rounds_with_kill: int32;
+    
+        clutches: int32;        // clutch situations won
+        clutch_attempts: int32; // clutch situations reached, win or lose
+    
+        // Assists aren't derivable from kill events alone (they need damage
+        // data this model doesn't track); left at 0 unless you set it yourself.
+        assists: int32;
+        
+        fun default() -> This {
+            return r6::PlayerMatchStats {
+                .player_id = r6::PlayerId::default(),
+                .username = std::string::default(),
+                .team_index = r6::TeamIndex::default(),
+                .rounds_played = 0,
+                .kills = 0,
+                .weapon_kills = 0,
+                .deaths = 0,
+                .headshots = 0,
+                .opening_kills = 0,
+                .opening_deaths = 0,
+                .plants = 0,
+                .defuses = 0,
+                .trade_kills = 0,
+                .dead_for_trade = 0,
+                .rounds_survived = 0,
+                .rounds_with_kost = 0,
+                .rounds_with_kill = 0,
+                .clutches = 0,
+                .clutch_attempts = 0,
+                .assists = 0
+            };
+        }
+        fun kd(*const this) -> float64 {
+            if this->deaths <= 0 {
+                return this->kills as float64;
+            }
+            return (this->kills as float64) / (this->deaths as float64);
+        }
+        fun kpr(*const this) -> float64 {
+            if this->kills <= 0 {
+                return 0.0;
+            }
+            return (this->kills as float64) / (this->rounds_played as float64);
+        }
+        fun hs_percent(*const this) -> float64 {
+            if this->kills <= 0 {
+                return 0.0;
+            }
+            return (this->headshots as float64) / (this->kills as float64);
+        }
+        fun srv(*const this) -> float64 {
+            if this->rounds_played <= 0 {
+                return 0.0;
+            }
+            return (this->rounds_survived as float64) / (this->rounds_played as float64);
+        }
+        fun kost(*const this) -> float64 {
+            if this->rounds_played <= 0 {
+                return 0.0;
+            }
+            return (this->rounds_with_kost as float64) / (this->rounds_played as float64);
+        }
+        fun entry(*const this) -> int32 { return this->opening_kills - this->opening_deaths; }
+        fun trade_diff(*const this) -> int32 { return this->trade_kills - this->dead_for_trade; }
+        fun objective(*const this) -> int32 { return this->plants + this->defuses; }
+        fun rating(*const this) -> float64 {
+            if this->rounds_played == 0 {
+                return 0.0;
+            }
+            let kpr = (0.3 as float64) * this->kpr();
+            let srv = (0.25 as float64) * this->srv();
+            let kost = (0.25 as float64) * this->kost();
+            let trade_diff = (0.10 as float64) * ((this->trade_diff() as float64) / (this->rounds_played as float64));
+            let entries = (0.10 as float64) * ((this->entry() as float64) / (this->rounds_played as float64));
+            return kpr + srv + kost + trade_diff + entries;
+        }
+    }
+
+    public struct Match {
+      public:
+        fun new(match_id: std::string, map: std::string, game_mode: std::string, version: std::string) -> This {
+            return r6::Match {
+                .match_id = std::move(match_id),
+                .map = std::move(map),
+                .game_mode = std::move(game_mode),
+                .version = std::move(version),
+                .teams = [r6::Team::default(); 2],
+                .roster = std::vector<r6::Player>::with_capacity(10),
+                // Standard size for scrims 6-6
+                .rounds = std::vector<r6::Round>::with_capacity(12),
+                .next_player_id = r6::PlayerId::new(0),
+            };
+        }
+        //! NB: index can only be either 1 or 2. Beware
+        fun set_team(*this, index: uint64, team: r6::Team) {
+            if (index < 0 || index > 1) {
+                return;
+            }
+            team.index = r6::TeamIndex::new(index as int32);
+            this->teams[index] = std::move(team);
+        }
+        fun add_player(*this, username: std::string, team_index: int32) -> r6::PlayerId {
+            let id = this->next_player_id;
+            this->next_player_id = this->next_player_id + r6::PlayerId::new(1);
+            let new_player = r6::Player::new(id, std::move(username), r6::TeamIndex::new(team_index));
+            this->roster.push(std::move(new_player));
+            return id;
+        }
+        fun add_round(*this, round_number: int32, site: std::string) -> *r6::Round {
+            let new_round = r6::Round::new(round_number, std::move(site));
+            this->rounds.push(std::move(new_round));
+            return this->rounds.get_mut(this->rounds.len() - 1);
+        }
+        fun find_player(*const this, id: r6::PlayerId) -> *const r6::Player {
+            let i: uint64 = 0;
+            while i < this->roster.len() {
+                let p = this->roster.get(i);
+                if p->id == id {
+                    return p;
+                }
+
+                i = i + 1;
+            }
+            return null;
+        }
+        fun find_player_by_username(*const this, username: *const std::string) -> *const r6::Player {
+            let i: uint64 = 0;
+            while i < this->roster.len() {
+                let p = this->roster.get(i);
+                if p->username == *username {
+                    return p;
+                }
+
+                i = i + 1;
+            }
+            return null;
+        }
+        fun team_score(*const this, team_index: r6::TeamIndex) -> int32 {
+            let score: int32 = 0;
+            let i: uint64 = 0;
+            while i < this->rounds.len() {
+                let r = this->rounds.get(i);
+                if r->winning_team_index() == team_index {
+                    score = score + 1;
+                }
+
+                i = i + 1;
+            }
+            return score;
+        }
+        fun get_outcome(*const this, team_index: r6::TeamIndex) -> MatchOutcome {
+            let other_index = r6::TeamIndex::new(0);
+            if team_index == r6::TeamIndex::new(0) {
+                other_index = r6::TeamIndex::new(1);
+            }
+            let my_score = this->team_score(team_index);
+            let other_score = this->team_score(other_index);
+
+            if my_score > other_score {
+                return MatchOutcome::WIN;
+            }
+            if my_score < other_score {
+                return MatchOutcome::LOSS;
+            }
+            return MatchOutcome::DRAW;
+        }
+        fun get_player_stats(*const this, player_id: r6::PlayerId) -> r6::PlayerMatchStats {
+            let stats = r6::PlayerMatchStats::default();
+
+            let player = this->find_player(player_id);
+            if (player == null) {
+                return stats;
+            }
+        
+            stats.player_id = player->id;
+            stats.username = player->username.copy();
+            stats.team_index = player->team_index;
+        
+            let i: uint64 = 0;
+            while i < this->rounds.len() {
+                let round = this->rounds.get(i);
+                if (round->has_player(player_id)) {
+                    stats.rounds_played = stats.rounds_played + 1;
+                    // TODO: Handle empty optional here
+                    let rs = round->get_player_stats(player_id).value();
+            
+                    stats.kills = stats.kills + rs.kills;
+                    stats.weapon_kills = stats.weapon_kills + rs.weapon_kills;
+
+                    if rs.died { stats.deaths = stats.deaths + 1; } 
+
+                    stats.headshots = stats.headshots + rs.headshots;
+
+                    if rs.opening_kill { stats.opening_kills = stats.opening_kills + 1; }
+
+                    if rs.opening_death { stats.opening_deaths = stats.opening_deaths + 1; }
+                    
+                    stats.plants = stats.plants + rs.plants;
+                    stats.defuses = stats.defuses + rs.defuses;
+                    stats.trade_kills = stats.trade_kills + rs.trade_kills;
+
+                    if rs.was_traded { stats.dead_for_trade = stats.dead_for_trade + 1; }
+                    
+                    if rs.survived { stats.rounds_survived = stats.rounds_survived + 1; }
+                    
+                    if rs.got_kost() { stats.rounds_with_kost = stats.rounds_with_kost + 1; }
+                    
+                    if rs.kills > 0 { stats.rounds_with_kill = stats.rounds_with_kill+ 1; }
+
+                    if (rs.clutch) { stats.clutches = stats.clutches + 1; }
+
+                    if (rs.clutch_against > 0) { stats.clutch_attempts = stats.clutch_attempts + 1; }
+                }
+
+                i = i + 1;
+            }
+        
+            return stats;
+        }
+        //! TODO: Add a sorting thingy on this
+        fun get_leaderboard(*const this) -> std::vector<r6::PlayerMatchStats> {
+            let result = std::vector<r6::PlayerMatchStats>::with_capacity(this->roster.len());
+            let i: uint64 = 0;
+            while i < this->roster.len() {
+                let p = this->roster.get(i);
+                let stats = this->get_player_stats(p->id);
+                result.push(std::move(stats));
+            }
+
+            return result;
+        }
+
+      private:
+        match_id: std::string;
+        map: std::string;
+        game_mode: std::string;
+        version: std::string;
+        teams: [r6::Team; 2];
+        roster: std::vector<r6::Player>;
+        rounds: std::vector<r6::Round>;
+        next_player_id: r6::PlayerId;
+    }
+}

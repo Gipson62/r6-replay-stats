@@ -1,0 +1,84 @@
+namespace r6 {
+    public struct PlayerId {
+      public:
+        val: int32;
+        fun default() -> This {
+            return r6::PlayerId { .val = - 1 };
+        }
+        fun new(id: int32) -> This {
+            return r6::PlayerId { .val = id };
+        }
+        operator equal(*const this, other: *const This) -> bool {
+            return this->val == other->val;
+        }
+        operator not_equal(*const this, other: *const This) -> bool {
+            return this->val != other->val;
+        }
+        operator add(*const this, other: *const This) -> This {
+            return r6::PlayerId::new(this->val + other->val);
+        }
+        
+        fun hash(*const this) -> uint64 {
+            return this->val as uint64;
+        }
+    }
+
+    public struct TeamIndex {
+      public:
+        val: int32;
+        fun default() -> This {
+            return r6::TeamIndex {
+                .val = -1
+            };
+        }
+        fun new(id: int32) -> This {
+            return r6::TeamIndex {
+                .val = id,
+            };
+        }
+        fun hash(*const this) -> uint64 {
+            return this->val as uint64;
+        }
+        operator equal(*const this, other: *const This) -> bool {
+            return this->val == other->val;
+        }
+        operator not_equal(*const this, other: *const This) -> bool {
+            return this->val != other->val;
+        }
+    }
+
+    enum TeamSide {
+        ATTACK;
+        DEFENSE;
+        // Should not happen
+        UNKNOWN_TEAM_SIDE;
+    }
+
+    enum WinCondition {
+        ELIMININATION;
+        BOMB_DEFUSED;
+        DEFUSER_DISABLED;
+        // Not relevant, but who knows
+        OBJECTIVE_SECURED;
+        // Not relevant, but who knows
+        HOSTAGE_EXTRACTED;
+        TIME_EXPIRED;
+        UNKNOWN_WIN_CON;
+    }
+
+
+
+    enum ObjectiveActionType {
+        PLANT_START;
+        PLANT_COMPLETE;
+        DISABLE_START;
+        DISABLE_COMPLETE;
+        LOCATE_OBJECTIVE;
+    }
+}
+
+enum MatchOutcome {
+    WIN;
+    LOSS;
+    DRAW;
+}
