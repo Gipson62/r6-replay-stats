@@ -60,4 +60,187 @@ namespace dissect {
     private extern "C" fun EventUsername(h: uint64, index: int32) -> str;
     #[c_name("Dissect_EventTarget")]
     private extern "C" fun EventTarget(h: uint64, index: int32) -> str;
+
+    // ---- glue: dissect handle -> r6::Match / r6::Round ----
+    //
+    // Known gaps versus the full r6-dissect data model, given the current
+    // extern surface above: weapon name, headshot flag, per-round operator,
+    // and per-round TeamSide (attack/defense) aren't exposed by any
+    // Dissect_* binding, so KillEvent.weapon stays empty, is_headshot stays
+    // false, RoundParticipant.side stays UNKNOWN_TEAM_SIDE, and
+    // operator_name stays empty. Round win_condition isn't exposed either
+    // (only the winning team index is), so it's always UNKNOWN_WIN_CON.
+    // Extend the cgo wrapper / this binding set if you need those.
+    //
+    // Also unverified: the exact strings Dissect_EventType returns for a
+    // kill / plant-complete / disable-complete event ("Kill",
+    // "DefuserPlantComplete", "DefuserDisableComplete" below). These match
+    // the Go MatchUpdateType.String() values used when the wrapper was
+    // written, but weren't re-checked against the current r6-dissect
+    // release. If kills/objective events silently don't show up, print
+    // dissect::EventType's raw value for a few events first and compare.
+
+    // Resolves (or registers) every player from the currently-open round's
+    // header into `match_`'s roster, then builds and appends one r6::Round
+    // from that round's participants, kill timeline, objective events, and
+    // winner. Does not touch match_'s header fields (id/map/mode/version).
+    private fun populate_round(match_: *r6::Match, handle: uint64) {
+        let player_count = dissect::PlayerCount(handle);
+        let round_player_ids = std::vector<r6::PlayerId>::with_capacity(player_count as uint64);
+
+        let i: int32 = 0;
+        while i < player_count {
+            let username_raw = dissect::PlayerUsername(handle, i);
+            let username = std::string::from_chars(username_raw);
+            let team_index = dissect::PlayerTeamIndex(handle, i);
+
+            let existing = match_->find_player_by_username(&username);
+            let player_id = r6::PlayerId::default();
+            if existing != null {
+                player_id = existing->id;
+            } else {
+                player_id = match_->add_player(username.copy(), team_index);
+            }
+            round_player_ids.push(player_id);
+
+            dissect::FreeString(username_raw);
+            i = i + 1;
+        }
+
+        let round_number = dissect::RoundNumber(handle);
+        let site_raw = dissect::ObjectiveSite(handle);
+        let site = std::string::from_chars(site_raw);
+        dissect::FreeString(site_raw);
+
+        let round = match_->add_round(round_number, std::move(site));
+
+        i = 0;
+        while i < player_count {
+            let team_index = dissect::PlayerTeamIndex(handle, i);
+            round->add_participant(r6::RoundParticipant::new(
+                *round_player_ids.get(i as uint64),
+                r6::TeamIndex::new(team_index),
+                r6::TeamSide::UNKNOWN_TEAM_SIDE,
+                std::string::default()
+            ));
+            i = i + 1;
+        }
+
+        let event_count = dissect::EventCount(handle);
+        let kill_type = std::string::from_chars("Kill");
+        let plant_type = std::string::from_chars("DefuserPlantComplete");
+        let disable_type = std::string::from_chars("DefuserDisableComplete");
+
+        i = 0;
+        while i < event_count {
+            let type_raw = dissect::EventType(handle, i);
+            let type_str = std::string::from_chars(type_raw);
+            let time = dissect::EventTimeInSeconds(handle, i);
+
+            if type_str == kill_type {
+                let killer_raw = dissect::EventUsername(handle, i);
+                let victim_raw = dissect::EventTarget(handle, i);
+                let killer_name = std::string::from_chars(killer_raw);
+                let victim_name = std::string::from_chars(victim_raw);
+
+                let killer_id = r6::PlayerId::default();
+                let killer_player = match_->find_player_by_username(&killer_name);
+                if killer_player != null {
+                    killer_id = killer_player->id;
+                }
+
+                let victim_id = r6::PlayerId::default();
+                let victim_player = match_->find_player_by_username(&victim_name);
+                if victim_player != null {
+                    victim_id = victim_player->id;
+                }
+
+                round->add_kill(r6::KillEvent::new(
+                    time,
+                    killer_id,
+                    victim_id,
+                    false,
+                    std::optional<std::string>::empty()
+                ));
+
+                dissect::FreeString(killer_raw);
+                dissect::FreeString(victim_raw);
+            } else if type_str == plant_type {
+                let user_raw = dissect::EventUsername(handle, i);
+                let username = std::string::from_chars(user_raw);
+                let player = match_->find_player_by_username(&username);
+                if player != null {
+                    round->add_objective_event(r6::ObjectiveEvent::new(
+                        time, player->id, r6::ObjectiveActionType::PLANT_COMPLETE
+                    ));
+                }
+                dissect::FreeString(user_raw);
+            } else if type_str == disable_type {
+                let user_raw = dissect::EventUsername(handle, i);
+                let username = std::string::from_chars(user_raw);
+                let player = match_->find_player_by_username(&username);
+                if player != null {
+                    round->add_objective_event(r6::ObjectiveEvent::new(
+                        time, player->id, r6::ObjectiveActionType::DISABLE_COMPLETE
+                    ));
+                }
+                dissect::FreeString(user_raw);
+            }
+
+            dissect::FreeString(type_raw);
+            i = i + 1;
+        }
+
+        let winning_team = dissect::RoundWinningTeamIndex(handle);
+        round->set_winner(r6::TeamIndex::new(winning_team), r6::WinCondition::UNKNOWN_WIN_CON);
+    }
+
+    //! Opens the first round file of a match: reads header info to
+    //! construct a fresh r6::Match, then loads that round's data into it.
+    //! Returns empty on failure to open/read the file.
+    public fun open_match(path: *std::string) -> std::optional<r6::Match> {
+        let c_path = path->c_str();
+        // c_str() returns *const uint8; Dissect_Open wants a raw C string.
+        // Adjust this cast if the compiler rejects it as written.
+        let handle = dissect::Open(c_path as *char);
+        if handle == 0 {
+            return std::optional<r6::Match>::empty();
+        }
+
+        let match_id_raw = dissect::MatchID(handle);
+        let map_raw = dissect::Map(handle);
+        let game_mode_raw = dissect::GameMode(handle);
+        let version_raw = dissect::GameVersion(handle);
+
+        let match_value = r6::Match::new(
+            std::string::from_chars(match_id_raw),
+            std::string::from_chars(map_raw),
+            std::string::from_chars(game_mode_raw),
+            std::string::from_chars(version_raw)
+        );
+
+        dissect::FreeString(match_id_raw);
+        dissect::FreeString(map_raw);
+        dissect::FreeString(game_mode_raw);
+        dissect::FreeString(version_raw);
+
+        dissect::populate_round(&match_value, handle);
+        dissect::Free(handle);
+
+        return std::optional<r6::Match>::of(std::move(match_value));
+    }
+
+    //! Loads one more round file into an already-initialized match.
+    //! Returns false (leaving match_ untouched) on failure to open/read.
+    public fun load_round(match_: *r6::Match, path: *std::string) -> bool {
+        let c_path = path->c_str();
+        let handle = dissect::Open(c_path as *char);
+        if handle == 0 {
+            return false;
+        }
+
+        dissect::populate_round(match_, handle);
+        dissect::Free(handle);
+        return true;
+    }
 }

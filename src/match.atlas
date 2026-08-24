@@ -256,6 +256,8 @@ namespace r6 {
                 let p = this->roster.get(i);
                 let stats = this->get_player_stats(p->id);
                 result.push(std::move(stats));
+
+                i = i + 1;
             }
 
             return result;
