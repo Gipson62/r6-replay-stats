@@ -2,65 +2,113 @@ import "src/r6-dissect.atlas";
 import "std/io";
 import "std/string";
 
+#[c_name("putchar")]
+private extern "C" fun putchar(c: int32) -> int32;
+
+private fun print_repeated(ch: int32, count: int32) {
+    let i: int32 = 0;
+    while i < count {
+        putchar(ch);
+        i = i + 1;
+    }
+}
+
+// Column widths below (16, 8, 8, 8, 8, 8, 7, 7, 6, 9, 8) must stay in sync
+// between print_row_separator and every printf field width in
+// print_leaderboard -- change one, change both, or the borders won't line
+// up with the content. table_width is their sum plus one '+' per column
+// plus the leading '+', used for the title block's own border.
+private fun table_width() -> int32 {
+    return 18 + 18 + 18 + 9 + 8 + 8 + 7 + 10 + 9;
+}
+
+private fun print_row_separator() {
+    std::print("+");
+    print_repeated('-' as int32, 16);
+    std::print("+");
+    print_repeated('-' as int32, 8);
+    std::print("+");
+    print_repeated('-' as int32, 8);
+    std::print("+");
+    print_repeated('-' as int32, 8);
+    std::print("+");
+    print_repeated('-' as int32, 8);
+    std::print("+");
+    print_repeated('-' as int32, 8);
+    std::print("+");
+    print_repeated('-' as int32, 7);
+    std::print("+");
+    print_repeated('-' as int32, 7);
+    std::print("+");
+    print_repeated('-' as int32, 6);
+    std::print("+");
+    print_repeated('-' as int32, 9);
+    std::print("+");
+    print_repeated('-' as int32, 8);
+    std::println("+");
+}
+
+private fun print_header_row() {
+    std::printf("|%-16s", "Player");
+    std::printf("|%8s", "K/D");
+    std::printf("|%8s", "KPR");
+    std::printf("|%8s", "HS%");
+    std::printf("|%8s", "SRV");
+    std::printf("|%8s", "KOST");
+    std::printf("|%7s", "Entry");
+    std::printf("|%7s", "Trade");
+    std::printf("|%6s", "Obj");
+    std::printf("|%9s", "Clutches");
+    std::printf("|%8s|\n", "Rating");
+}
+
 fun print_leaderboard(match_: *const r6::Match, title: *const uint8) {
+    let map_name = match_->map();
+    let team0_name = match_->team_name(0);
+    let team1_name = match_->team_name(1);
+    let team0_score = match_->team_score(r6::TeamIndex::new(0));
+    let team1_score = match_->team_score(r6::TeamIndex::new(1));
+    let rounds = match_->round_count();
+
+    std::printf("\n%s\n", title);
+    print_repeated('=' as int32, table_width());
+    std::println("");
+    std::printf("Map: %s\n", map_name->c_str());
+    std::printf("%s", team0_name->c_str());
+    std::printf(" %d", team0_score);
+    std::print(" vs ");
+    std::printf("%s", team1_name->c_str());
+    std::printf(" %d\n", team1_score);
+    std::printf("Rounds played: %d\n", rounds);
+    // No match timestamp is currently tracked (r6::Match has no time
+    // field) -- Header.Timestamp exists upstream in r6-dissect if you want
+    // to wire it through DissectHeader later.
+    print_repeated('=' as int32, table_width());
+    std::println("");
+
+    print_row_separator();
+    print_header_row();
+    print_row_separator();
+
     let board = match_->get_leaderboard();
-
-    std::printf("\n\n %s VS ", match_->get_team_name(r6::TeamIndex::new(0))->c_str());
-    std::printf("%s\n", match_->get_team_name(r6::TeamIndex::new(1))->c_str());
-
-    std::printf("Map: %s  ", match_->get_map_name()->c_str());
-    // We are not necessarily team_index 0...
-    // I'll add a way later to tell which team we are directly in the future app
-    let team_index = r6::TeamIndex::new(0);
-    if match_->get_team_name(r6::TeamIndex::new(0)) != &std::string::from_chars("RCK Esport") {
-        team_index = r6::TeamIndex::new(1);
-    }
-    let outcome = match_->get_outcome(team_index);
-    if outcome == MatchOutcome::WIN {
-        std::print("WIN");
-    } else if outcome == MatchOutcome::LOSS {
-        std::print("LOSS");
-    } else {
-        std::print("DRAW");
-    }
-    std::printf(" (%d - ", match_->team_score(r6::TeamIndex::new(0)));
-    std::printf("%d)\n\n", match_->team_score(r6::TeamIndex::new(1)));
-
-
-    std::print("+------------------+-----+-----+-----+-----+------+-------+-------+-----+----------+--------+\n");
-
-    std::printf("| %-16s |", "Username");
-    std::printf(" %3s |", "K/D");
-    std::printf(" %3s |", "KPR");
-    std::printf(" %3s |", "HS%");
-    std::printf(" %3s |", "SRV");
-    std::printf(" %4s |", "KOST");
-    std::printf(" %5s |", "Entry");
-    std::printf(" %5s |", "Trade");
-    std::printf(" %3s |", "Obj");
-    std::printf(" %8s |", "Clutches");
-    std::printf(" %6s |\n", "Rating");
-
-    std::print("+------------------+-----+-----+-----+-----+------+-------+-------+-----+----------+--------+\n");
-
     let i: uint64 = 0;
     while i < board.len() {
-        let player = board.get(i);
-        std::printf("| %-16s |", player->username.c_str());
-        std::printf(" %3.1f |", player->kd());
-        std::printf(" %3.1f |", player->kpr());
-        std::printf(" %3.1f |", player->hs_percent());
-        std::printf(" %3.1f |", player->srv());
-        std::printf(" %4.2f |", player->kost());
-        std::printf(" %5d |", player->entry());
-        std::printf(" %5d |", player->trade_diff());
-        std::printf(" %3d |", player->objective());
-        std::printf(" %8d |", player->clutches);
-        std::printf(" %6.2f |\n", player->rating());
+        let s = board.get(i);
+        std::printf("|%-16s", s->username.c_str());
+        std::printf("|%8.2f", s->kd());
+        std::printf("|%8.2f", s->kpr());
+        std::printf("|%8.2f", s->hs_percent());
+        std::printf("|%8.2f", s->srv());
+        std::printf("|%8.2f", s->kost());
+        std::printf("|%7d", s->entry());
+        std::printf("|%7d", s->trade_diff());
+        std::printf("|%6d", s->objective());
+        std::printf("|%9d", s->clutches);
+        std::printf("|%8.2f|\n", s->rating());
 
         i = i + 1;
     }
-    std::print("+------------------+-----+-----+-----+-----+------+-------+-------+-----+----------+--------+\n");
+    print_row_separator();
 }
 
 fun main(argc: int32, argv: **char) -> int32 {
@@ -103,11 +151,6 @@ fun main(argc: int32, argv: **char) -> int32 {
             }
         }
     }
-
-    let team0 = match_.team_score(r6::TeamIndex::new(0));
-    let team1 = match_.team_score(r6::TeamIndex::new(1));
-    std::printf("\nFinal score: %d", team0);
-    std::printf(" - %d\n", team1);
 
     print_leaderboard(&match_, "Final leaderboard");
 
