@@ -26,6 +26,47 @@ extern const char *_GoStringPtr(_GoString_ s);
 #include <stdlib.h>
 #include <stdint.h>
 
+// One malloc'd instance per Dissect_Get* call; each has a paired
+// Dissect_Free* that releases every string field plus the struct itself.
+// "type" is a Go keyword, hence "event_type" below -- keeps the Go and C
+// sides using the identical field name instead of cgo's keyword-collision
+// renaming rules.
+
+typedef struct {
+    char* match_id;
+    char* map_name;
+    char* game_mode;
+    char* game_version;
+    char* site;
+    int32_t round_number;
+    int32_t rounds_per_match;
+} DissectHeader;
+
+typedef struct {
+    char* name;
+    int32_t starting_score;
+    int32_t score;
+    int32_t won;            // 0/1
+    char* win_condition;    // "KilledOpponents"/"SecuredArea"/"DisabledDefuser"/
+                             // "DefusedBomb"/"ExtractedHostage"/"Time"/"" if undecided
+    char* role;              // "Attack"/"Defense"
+} DissectTeam;
+
+typedef struct {
+    char* username;
+    int32_t team_index;
+    char* operator_name;
+} DissectPlayer;
+
+typedef struct {
+    char* event_type;       // "Kill", "Death", "DefuserPlantComplete", ...
+    char* username;
+    char* target;
+    int32_t headshot;       // -1 = not applicable (source Headshot was nil), else 0/1
+    double time_in_seconds;
+    char* operator_name;    // actor's operator at the time of this event
+} DissectEvent;
+
 #line 1 "cgo-generated-wrapper"
 
 
@@ -90,28 +131,16 @@ extern "C" {
 
 extern uintptr_t Dissect_Open(char* path);
 extern void Dissect_Free(uintptr_t handle);
-extern void Dissect_FreeString(char* s);
-extern char* Dissect_MatchID(uintptr_t handle);
-extern char* Dissect_Map(uintptr_t handle);
-extern char* Dissect_GameMode(uintptr_t handle);
-extern char* Dissect_GameVersion(uintptr_t handle);
-extern int Dissect_PlayerCount(uintptr_t handle);
-extern char* Dissect_PlayerUsername(uintptr_t handle, int index);
-extern int Dissect_PlayerTeamIndex(uintptr_t handle, int index);
-extern int Dissect_PlayerKills(uintptr_t handle, int index);
-extern int Dissect_PlayerDeaths(uintptr_t handle, int index);
-extern int Dissect_PlayerAssists(uintptr_t handle, int index);
-extern int Dissect_PlayerHeadshots(uintptr_t handle, int index);
-extern int Dissect_RoundNumber(uintptr_t handle);
-extern int Dissect_RoundsPerMatch(uintptr_t handle);
-extern int Dissect_RoundWinningTeamIndex(uintptr_t handle);
-extern char* Dissect_ObjectiveSite(uintptr_t handle);
-extern int Dissect_EventCount(uintptr_t handle);
-extern char* Dissect_EventType(uintptr_t handle, int index);
-extern char* Dissect_EventTime(uintptr_t handle, int index);
-extern double Dissect_EventTimeInSeconds(uintptr_t handle, int index);
-extern char* Dissect_EventUsername(uintptr_t handle, int index);
-extern char* Dissect_EventTarget(uintptr_t handle, int index);
+extern int32_t Dissect_PlayerCount(uintptr_t handle);
+extern int32_t Dissect_EventCount(uintptr_t handle);
+extern DissectHeader* Dissect_GetHeader(uintptr_t handle);
+extern void Dissect_FreeHeader(DissectHeader* h);
+extern DissectTeam* Dissect_GetTeam(uintptr_t handle, int32_t index);
+extern void Dissect_FreeTeam(DissectTeam* t);
+extern DissectPlayer* Dissect_GetPlayer(uintptr_t handle, int32_t index);
+extern void Dissect_FreePlayer(DissectPlayer* p);
+extern DissectEvent* Dissect_GetEvent(uintptr_t handle, int32_t index);
+extern void Dissect_FreeEvent(DissectEvent* e);
 
 #ifdef __cplusplus
 }

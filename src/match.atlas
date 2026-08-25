@@ -262,6 +262,12 @@ namespace r6 {
 
             return result;
         }
+        fun get_team_name(*const this, team_index: r6::TeamIndex) -> *const std::string {
+            return &this->teams[team_index.val as uint64].name;
+        }
+        fun get_map_name(*const this) -> *const std::string {
+            return &this->map;
+        }
 
       private:
         match_id: std::string;

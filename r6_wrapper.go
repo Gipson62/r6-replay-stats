@@ -3,6 +3,47 @@ package main
 /*
 #include <stdlib.h>
 #include <stdint.h>
+
+// One malloc'd instance per Dissect_Get* call; each has a paired
+// Dissect_Free* that releases every string field plus the struct itself.
+// "type" is a Go keyword, hence "event_type" below -- keeps the Go and C
+// sides using the identical field name instead of cgo's keyword-collision
+// renaming rules.
+
+typedef struct {
+    char* match_id;
+    char* map_name;
+    char* game_mode;
+    char* game_version;
+    char* site;
+    int32_t round_number;
+    int32_t rounds_per_match;
+} DissectHeader;
+
+typedef struct {
+    char* name;
+    int32_t starting_score;
+    int32_t score;
+    int32_t won;            // 0/1
+    char* win_condition;    // "KilledOpponents"/"SecuredArea"/"DisabledDefuser"/
+                             // "DefusedBomb"/"ExtractedHostage"/"Time"/"" if undecided
+    char* role;              // "Attack"/"Defense"
+} DissectTeam;
+
+typedef struct {
+    char* username;
+    int32_t team_index;
+    char* operator_name;
+} DissectPlayer;
+
+typedef struct {
+    char* event_type;       // "Kill", "Death", "DefuserPlantComplete", ...
+    char* username;
+    char* target;
+    int32_t headshot;       // -1 = not applicable (source Headshot was nil), else 0/1
+    double time_in_seconds;
+    char* operator_name;    // actor's operator at the time of this event
+} DissectEvent;
 */
 import "C"
 
@@ -18,6 +59,14 @@ import (
 func init() {
 	zerolog.SetGlobalLevel(zerolog.Disabled)
 }
+
+func freeCStr(s *C.char) {
+	if s != nil {
+		C.free(unsafe.Pointer(s))
+	}
+}
+
+// --- handle lifecycle ---
 
 // Dissect_Open ingests a round file path, runs dissect.NewReader + Reader.Read,
 // and returns an opaque handle to the resulting *dissect.Reader.
@@ -57,17 +106,6 @@ func Dissect_Free(handle C.uintptr_t) {
 	cgo.Handle(handle).Delete()
 }
 
-// Dissect_FreeString releases a *C.char allocated by C.CString in this wrapper.
-// Must be called on every non-NULL string returned by the getters below.
-//
-//export Dissect_FreeString
-func Dissect_FreeString(s *C.char) {
-	if s == nil {
-		return
-	}
-	C.free(unsafe.Pointer(s))
-}
-
 // readerFromHandle resolves a handle to its *dissect.Reader.
 // Recovers from panics raised by an invalid, stale, or zero handle.
 func readerFromHandle(handle C.uintptr_t) (r *dissect.Reader, ok bool) {
@@ -81,278 +119,139 @@ func readerFromHandle(handle C.uintptr_t) (r *dissect.Reader, ok bool) {
 	return
 }
 
-// playerRoundStats resolves the PlayerRoundStats entry matching the player
-// at Header.Players[index], by username, for the current round.
-func playerRoundStats(r *dissect.Reader, index int) (dissect.PlayerRoundStats, bool) {
-	if index < 0 || index >= len(r.Header.Players) {
-		return dissect.PlayerRoundStats{}, false
-	}
-	username := r.Header.Players[index].Username
-	for _, s := range r.PlayerStats() {
-		if s.Username == username {
-			return s, true
-		}
-	}
-	return dissect.PlayerRoundStats{}, false
-}
-
-// --- Header Metrics ---
-
-//export Dissect_MatchID
-func Dissect_MatchID(handle C.uintptr_t) *C.char {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return nil
-	}
-	return C.CString(r.Header.MatchID)
-}
-
-//export Dissect_Map
-func Dissect_Map(handle C.uintptr_t) *C.char {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return nil
-	}
-	return C.CString(r.Header.Map.String())
-}
-
-//export Dissect_GameMode
-func Dissect_GameMode(handle C.uintptr_t) *C.char {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return nil
-	}
-	return C.CString(r.Header.GameMode.String())
-}
-
-//export Dissect_GameVersion
-func Dissect_GameVersion(handle C.uintptr_t) *C.char {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return nil
-	}
-	return C.CString(r.Header.GameVersion)
-}
-
-// --- Player Data ---
+// --- counts: still needed to know how many indices are valid ---
 
 //export Dissect_PlayerCount
-func Dissect_PlayerCount(handle C.uintptr_t) C.int {
+func Dissect_PlayerCount(handle C.uintptr_t) C.int32_t {
 	r, ok := readerFromHandle(handle)
 	if !ok {
 		return -1
 	}
-	return C.int(len(r.Header.Players))
+	return C.int32_t(len(r.Header.Players))
 }
-
-//export Dissect_PlayerUsername
-func Dissect_PlayerUsername(handle C.uintptr_t, index C.int) *C.char {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return nil
-	}
-	i := int(index)
-	if i < 0 || i >= len(r.Header.Players) {
-		return nil
-	}
-	return C.CString(r.Header.Players[i].Username)
-}
-
-//export Dissect_PlayerTeamIndex
-func Dissect_PlayerTeamIndex(handle C.uintptr_t, index C.int) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	i := int(index)
-	if i < 0 || i >= len(r.Header.Players) {
-		return -1
-	}
-	return C.int(r.Header.Players[i].TeamIndex)
-}
-
-//export Dissect_PlayerKills
-func Dissect_PlayerKills(handle C.uintptr_t, index C.int) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	s, ok := playerRoundStats(r, int(index))
-	if !ok {
-		return -1
-	}
-	return C.int(s.Kills)
-}
-
-// Dissect_PlayerDeaths returns 1 if the player died during this round, 0 if not,
-// -1 on out-of-bounds. The underlying library tracks round death as a bool (Died),
-// not a cumulative count; aggregate across rounds on the C side if needed.
-//
-//export Dissect_PlayerDeaths
-func Dissect_PlayerDeaths(handle C.uintptr_t, index C.int) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	s, ok := playerRoundStats(r, int(index))
-	if !ok {
-		return -1
-	}
-	if s.Died {
-		return 1
-	}
-	return 0
-}
-
-//export Dissect_PlayerAssists
-func Dissect_PlayerAssists(handle C.uintptr_t, index C.int) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	s, ok := playerRoundStats(r, int(index))
-	if !ok {
-		return -1
-	}
-	return C.int(s.Assists)
-}
-
-//export Dissect_PlayerHeadshots
-func Dissect_PlayerHeadshots(handle C.uintptr_t, index C.int) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	s, ok := playerRoundStats(r, int(index))
-	if !ok {
-		return -1
-	}
-	return C.int(s.Headshots)
-}
-
-// --- Round Metrics ---
-// dissect.Reader (from NewReader) represents a single round's data, not a
-// multi-round match object — the underlying library has no Match.Rounds slice.
-// RoundNumber/RoundsPerMatch expose the round's position within its match.
-
-//export Dissect_RoundNumber
-func Dissect_RoundNumber(handle C.uintptr_t) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	return C.int(r.Header.RoundNumber)
-}
-
-//export Dissect_RoundsPerMatch
-func Dissect_RoundsPerMatch(handle C.uintptr_t) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	return C.int(r.Header.RoundsPerMatch)
-}
-
-// Dissect_RoundWinningTeamIndex returns the index (0 or 1) of the team marked
-// Won for this round, or -1 if undetermined / handle invalid.
-//
-//export Dissect_RoundWinningTeamIndex
-func Dissect_RoundWinningTeamIndex(handle C.uintptr_t) C.int {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	for i, t := range r.Header.Teams {
-		if t.Won {
-			return C.int(i)
-		}
-	}
-	return -1
-}
-
-//export Dissect_ObjectiveSite
-func Dissect_ObjectiveSite(handle C.uintptr_t) *C.char {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return nil
-	}
-	return C.CString(r.Header.Site)
-}
-
-// --- Event Timeline (Match Feedback) ---
 
 //export Dissect_EventCount
-func Dissect_EventCount(handle C.uintptr_t) C.int {
+func Dissect_EventCount(handle C.uintptr_t) C.int32_t {
 	r, ok := readerFromHandle(handle)
 	if !ok {
 		return -1
 	}
-	return C.int(len(r.MatchFeedback))
+	return C.int32_t(len(r.MatchFeedback))
 }
 
-// Dissect_EventType returns the string form of MatchUpdateType
-// (Kill, Death, DefuserPlantStart, DefuserPlantComplete, DefuserDisableStart,
-// DefuserDisableComplete, LocateObjective, OperatorSwap, Battleye, PlayerLeave, Other).
+// --- struct getters ---
+// Each returns a malloc'd, caller-owned struct (nil on invalid handle /
+// out-of-bounds index), released via the paired Dissect_Free* function.
+
+// Dissect_GetHeader returns this round file's match/header metadata,
+// including the round number and site recorded for this specific round.
 //
-//export Dissect_EventType
-func Dissect_EventType(handle C.uintptr_t, index C.int) *C.char {
+//export Dissect_GetHeader
+func Dissect_GetHeader(handle C.uintptr_t) *C.DissectHeader {
 	r, ok := readerFromHandle(handle)
 	if !ok {
 		return nil
 	}
-	i := int(index)
-	if i < 0 || i >= len(r.MatchFeedback) {
-		return nil
-	}
-	return C.CString(r.MatchFeedback[i].Type.String())
+	out := (*C.DissectHeader)(C.malloc(C.size_t(C.sizeof_DissectHeader)))
+	out.match_id = C.CString(r.Header.MatchID)
+	out.map_name = C.CString(r.Header.Map.String())
+	out.game_mode = C.CString(r.Header.GameMode.String())
+	out.game_version = C.CString(r.Header.GameVersion)
+	out.site = C.CString(r.Header.Site)
+	out.round_number = C.int32_t(r.Header.RoundNumber)
+	out.rounds_per_match = C.int32_t(r.Header.RoundsPerMatch)
+	return out
 }
 
-//export Dissect_EventTime
-func Dissect_EventTime(handle C.uintptr_t, index C.int) *C.char {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return nil
+//export Dissect_FreeHeader
+func Dissect_FreeHeader(h *C.DissectHeader) {
+	if h == nil {
+		return
 	}
-	i := int(index)
-	if i < 0 || i >= len(r.MatchFeedback) {
-		return nil
-	}
-	return C.CString(r.MatchFeedback[i].Time)
+	freeCStr(h.match_id)
+	freeCStr(h.map_name)
+	freeCStr(h.game_mode)
+	freeCStr(h.game_version)
+	freeCStr(h.site)
+	C.free(unsafe.Pointer(h))
 }
 
-//export Dissect_EventTimeInSeconds
-func Dissect_EventTimeInSeconds(handle C.uintptr_t, index C.int) C.double {
-	r, ok := readerFromHandle(handle)
-	if !ok {
-		return -1
-	}
-	i := int(index)
-	if i < 0 || i >= len(r.MatchFeedback) {
-		return -1
-	}
-	return C.double(r.MatchFeedback[i].TimeInSeconds)
-}
-
-// Dissect_EventUsername returns the primary actor (killer, planter, disabler, locator).
+// Dissect_GetTeam returns team `index`'s (0 or 1) data for this round,
+// including its name, score, whether it won, and (if it won) how.
 //
-//export Dissect_EventUsername
-func Dissect_EventUsername(handle C.uintptr_t, index C.int) *C.char {
+//export Dissect_GetTeam
+func Dissect_GetTeam(handle C.uintptr_t, index C.int32_t) *C.DissectTeam {
 	r, ok := readerFromHandle(handle)
 	if !ok {
 		return nil
 	}
 	i := int(index)
-	if i < 0 || i >= len(r.MatchFeedback) {
+	if i < 0 || i >= len(r.Header.Teams) {
 		return nil
 	}
-	return C.CString(r.MatchFeedback[i].Username)
+	t := r.Header.Teams[i]
+	out := (*C.DissectTeam)(C.malloc(C.size_t(C.sizeof_DissectTeam)))
+	out.name = C.CString(t.Name)
+	out.starting_score = C.int32_t(t.StartingScore)
+	out.score = C.int32_t(t.Score)
+	if t.Won {
+		out.won = 1
+	} else {
+		out.won = 0
+	}
+	out.win_condition = C.CString(string(t.WinCondition))
+	out.role = C.CString(string(t.Role))
+	return out
 }
 
-// Dissect_EventTarget returns the secondary actor (victim, or empty string for
-// events with no target).
+//export Dissect_FreeTeam
+func Dissect_FreeTeam(t *C.DissectTeam) {
+	if t == nil {
+		return
+	}
+	freeCStr(t.name)
+	freeCStr(t.win_condition)
+	freeCStr(t.role)
+	C.free(unsafe.Pointer(t))
+}
+
+// Dissect_GetPlayer returns participant `index`'s data for this round:
+// username, team index, and the operator they played this round.
 //
-//export Dissect_EventTarget
-func Dissect_EventTarget(handle C.uintptr_t, index C.int) *C.char {
+//export Dissect_GetPlayer
+func Dissect_GetPlayer(handle C.uintptr_t, index C.int32_t) *C.DissectPlayer {
+	r, ok := readerFromHandle(handle)
+	if !ok {
+		return nil
+	}
+	i := int(index)
+	if i < 0 || i >= len(r.Header.Players) {
+		return nil
+	}
+	p := r.Header.Players[i]
+	out := (*C.DissectPlayer)(C.malloc(C.size_t(C.sizeof_DissectPlayer)))
+	out.username = C.CString(p.Username)
+	out.team_index = C.int32_t(p.TeamIndex)
+	out.operator_name = C.CString(p.Operator.String())
+	return out
+}
+
+//export Dissect_FreePlayer
+func Dissect_FreePlayer(p *C.DissectPlayer) {
+	if p == nil {
+		return
+	}
+	freeCStr(p.username)
+	freeCStr(p.operator_name)
+	C.free(unsafe.Pointer(p))
+}
+
+// Dissect_GetEvent returns match-feedback entry `index`: its type, the
+// primary/secondary actors, headshot (-1 if not applicable to this event
+// type), timestamp, and the actor's operator at the time.
+//
+//export Dissect_GetEvent
+func Dissect_GetEvent(handle C.uintptr_t, index C.int32_t) *C.DissectEvent {
 	r, ok := readerFromHandle(handle)
 	if !ok {
 		return nil
@@ -361,7 +260,33 @@ func Dissect_EventTarget(handle C.uintptr_t, index C.int) *C.char {
 	if i < 0 || i >= len(r.MatchFeedback) {
 		return nil
 	}
-	return C.CString(r.MatchFeedback[i].Target)
+	e := r.MatchFeedback[i]
+	out := (*C.DissectEvent)(C.malloc(C.size_t(C.sizeof_DissectEvent)))
+	out.event_type = C.CString(e.Type.String())
+	out.username = C.CString(e.Username)
+	out.target = C.CString(e.Target)
+	if e.Headshot == nil {
+		out.headshot = -1
+	} else if *e.Headshot {
+		out.headshot = 1
+	} else {
+		out.headshot = 0
+	}
+	out.time_in_seconds = C.double(e.TimeInSeconds)
+	out.operator_name = C.CString(e.Operator.String())
+	return out
+}
+
+//export Dissect_FreeEvent
+func Dissect_FreeEvent(e *C.DissectEvent) {
+	if e == nil {
+		return
+	}
+	freeCStr(e.event_type)
+	freeCStr(e.username)
+	freeCStr(e.target)
+	freeCStr(e.operator_name)
+	C.free(unsafe.Pointer(e))
 }
 
 func main() {}

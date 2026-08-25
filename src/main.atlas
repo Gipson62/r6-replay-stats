@@ -3,25 +3,64 @@ import "std/io";
 import "std/string";
 
 fun print_leaderboard(match_: *const r6::Match, title: *const uint8) {
-    std::printf("\n=== %s ===\n", title);
     let board = match_->get_leaderboard();
+
+    std::printf("\n\n %s VS ", match_->get_team_name(r6::TeamIndex::new(0))->c_str());
+    std::printf("%s\n", match_->get_team_name(r6::TeamIndex::new(1))->c_str());
+
+    std::printf("Map: %s  ", match_->get_map_name()->c_str());
+    // We are not necessarily team_index 0...
+    // I'll add a way later to tell which team we are directly in the future app
+    let team_index = r6::TeamIndex::new(0);
+    if match_->get_team_name(r6::TeamIndex::new(0)) != &std::string::from_chars("RCK Esport") {
+        team_index = r6::TeamIndex::new(1);
+    }
+    let outcome = match_->get_outcome(team_index);
+    if outcome == MatchOutcome::WIN {
+        std::print("WIN");
+    } else if outcome == MatchOutcome::LOSS {
+        std::print("LOSS");
+    } else {
+        std::print("DRAW");
+    }
+    std::printf(" (%d - ", match_->team_score(r6::TeamIndex::new(0)));
+    std::printf("%d)\n\n", match_->team_score(r6::TeamIndex::new(1)));
+
+
+    std::print("+------------------+-----+-----+-----+-----+------+-------+-------+-----+----------+--------+\n");
+
+    std::printf("| %-16s |", "Username");
+    std::printf(" %3s |", "K/D");
+    std::printf(" %3s |", "KPR");
+    std::printf(" %3s |", "HS%");
+    std::printf(" %3s |", "SRV");
+    std::printf(" %4s |", "KOST");
+    std::printf(" %5s |", "Entry");
+    std::printf(" %5s |", "Trade");
+    std::printf(" %3s |", "Obj");
+    std::printf(" %8s |", "Clutches");
+    std::printf(" %6s |\n", "Rating");
+
+    std::print("+------------------+-----+-----+-----+-----+------+-------+-------+-----+----------+--------+\n");
+
     let i: uint64 = 0;
     while i < board.len() {
-        let s = board.get(i);
-        std::printf("%s:\n", s->username.c_str());
-        std::printf(" K/D= %f\n", s->kd());
-        std::printf(" KPR= %f\n", s->kpr());
-        std::printf(" HS%%= %f\n", s->hs_percent());
-        std::printf(" SRV= %f\n", s->srv());
-        std::printf(" KOST= %f\n", s->kost());
-        std::printf(" Entry= %d\n", s->entry());
-        std::printf(" Trade= %d\n", s->trade_diff());
-        std::printf(" Obj= %d\n", s->objective());
-        std::printf(" Clutches= %d\n", s->clutches);
-        std::printf(" Rating= %f\n", s->rating());
+        let player = board.get(i);
+        std::printf("| %-16s |", player->username.c_str());
+        std::printf(" %3.1f |", player->kd());
+        std::printf(" %3.1f |", player->kpr());
+        std::printf(" %3.1f |", player->hs_percent());
+        std::printf(" %3.1f |", player->srv());
+        std::printf(" %4.2f |", player->kost());
+        std::printf(" %5d |", player->entry());
+        std::printf(" %5d |", player->trade_diff());
+        std::printf(" %3d |", player->objective());
+        std::printf(" %8d |", player->clutches);
+        std::printf(" %6.2f |\n", player->rating());
 
         i = i + 1;
     }
+    std::print("+------------------+-----+-----+-----+-----+------+-------+-------+-----+----------+--------+\n");
 }
 
 fun main(argc: int32, argv: **char) -> int32 {
@@ -44,15 +83,12 @@ fun main(argc: int32, argv: **char) -> int32 {
     std::println("Enter another round file path, 'leaderboard', or 'done'.");
 
     let done_str = std::string::from_chars("done").trim();
-    done_str.c_str();
     let leaderboard_str = std::string::from_chars("leaderboard").trim();
-    leaderboard_str.c_str();
 
     let done: bool = false;
     while !done {
         std::print("> ");
         let line = std::input().trim();
-        std::printf("%s", line.c_str());
 
         if line == done_str {
             done = true;
